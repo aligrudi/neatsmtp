@@ -220,6 +220,9 @@ static int reply_line(char *dst, int len)
 
 static int smtp_write(char *s, int len)
 {
+#ifdef DEBUG
+	print(s, len);
+#endif
 #ifdef SSL
 	return ssl_write(&ssl, (unsigned char *) s, len);
 #else
@@ -239,9 +242,6 @@ static int smtp_xwrite(char *buf, int len)
 		nw += ret;
 	}
 	fsync(fd);
-#ifdef DEBUG
-	print(buf, len);
-#endif
 	return nw;
 }
 
@@ -260,7 +260,7 @@ static void ehlo(void)
 	char line[BUFFSIZE];
 	int len;
 	len = reply_line(line, sizeof(line));
-	send_cmd("EHLO " HOSTNAME "\n");
+	send_cmd("EHLO " HOSTNAME "\r\n");
 	do {
 		len = reply_line(line, sizeof(line));
 	} while (!is_eoc(line, len));
@@ -271,15 +271,15 @@ static void login(char *user, char *pass)
 	char line[BUFFSIZE];
 	int len;
 	char *s = line;
-	send_cmd("AUTH LOGIN\n");
+	send_cmd("AUTH LOGIN\r\n");
 	len = reply_line(line, sizeof(line));
 	s = putb64(s, user, strlen(user));
-	s = putstr(s, "\n");
+	s = putstr(s, "\r\n");
 	send_cmd(line);
 	len = reply_line(line, sizeof(line));
 	s = line;
 	s = putb64(s, pass, strlen(pass));
-	s = putstr(s, "\n");
+	s = putstr(s, "\r\n");
 	send_cmd(line);
 	len = reply_line(line, sizeof(line));
 }
@@ -293,7 +293,7 @@ static int write_mail(struct account *account)
 	int i;
 	s = putstr(s, "MAIL FROM:<");
 	s = putstr(s, account->from);
-	s = putstr(s, ">\n");
+	s = putstr(s, ">\r\n");
 	send_cmd(line);
 	len = reply_line(line, sizeof(line));
 
@@ -310,20 +310,20 @@ static int write_mail(struct account *account)
 				char *r = line;
 				r = putstr(r, "RCPT TO:<");
 				r = putstr(r, addr);
-				r = putstr(r, ">\n");
+				r = putstr(r, ">\r\n");
 				send_cmd(line);
 				len = reply_line(line, sizeof(line));
 			}
 		}
 	}
 
-	send_cmd("DATA\n");
+	send_cmd("DATA\r\n");
 	len = reply_line(line, sizeof(line));
 	if (smtp_xwrite(mail, mail_len) != mail_len)
 		return -1;
-	send_cmd("\n.\n");
+	send_cmd("\r\n.\r\n");
 	len = reply_line(line, sizeof(line));
-	send_cmd("QUIT\n");
+	send_cmd("QUIT\r\n");
 	len = reply_line(line, sizeof(line));
 	return 0;
 }
