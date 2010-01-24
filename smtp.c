@@ -352,7 +352,8 @@ int main(int argc, char *argv[])
 	if ((mail_len = xread(STDIN_FILENO, mail, sizeof(mail))) == -1)
 		return 1;
 	account = choose_account();
-	fd = smtp_connect(account->server, account->port);
+	if ((fd = smtp_connect(account->server, account->port)) == -1)
+		return 1;
 #ifdef SSL
 	havege_init(&hs);
 	memset(&ssn, 0, sizeof(ssn));
