@@ -56,7 +56,7 @@ static int ps_recv(void *ctx, unsigned char *buf, int len)
 #endif
 
 static char *b64 =
-	"ABCDEFGHIJGLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static void b64_num(char *s, unsigned long num)
 {
