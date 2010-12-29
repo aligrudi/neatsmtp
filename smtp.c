@@ -320,17 +320,14 @@ static int write_mail(struct account *account)
 {
 	char line[BUFFSIZE];
 	int len;
-	char *s = line;
 	char *to_hdrs[] = {"to:", "cc:", "bcc:"};
 	int i;
-	s = putstr(s, "MAIL FROM:<");
-	s = putstr(s, account->from);
-	s = putstr(s, ">\r\n");
+	sprintf(line, "MAIL FROM:<%s>\r\n", account->from);
 	send_cmd(line);
 	len = reply_line(line, sizeof(line));
 
 	for (i = 0; i < ARRAY_SIZE(to_hdrs); i++) {
-		char *hdr, *end;
+		char *hdr, *end, *s;
 		char addr[BUFFSIZE];
 		if (!(hdr = find_hdr(to_hdrs[i])))
 			continue;
@@ -339,10 +336,7 @@ static int write_mail(struct account *account)
 		while ((s = cutaddr(addr, s, end - s)) && s < end) {
 			char *at = strchr(addr, '@');
 			if (at && at > addr && *(at + 1)) {
-				char *r = line;
-				r = putstr(r, "RCPT TO:<");
-				r = putstr(r, addr);
-				r = putstr(r, ">\r\n");
+				sprintf(line, "RCPT TO:<%s>\r\n", addr);
 				send_cmd(line);
 				len = reply_line(line, sizeof(line));
 			}
