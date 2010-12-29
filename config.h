@@ -1,5 +1,6 @@
 #define MAILLEN			(1 << 21)
 #define HOSTNAME		"hostname"
+#define DPRINT(msg, len)
 #define SSL
 
 struct account {

@@ -53,6 +53,53 @@ static int ps_recv(void *ctx, unsigned char *buf, int len)
 	return read(*(int *) ctx, buf, len);
 }
 
+static int smtp_read(char *buf, int len)
+{
+	return ssl_read(&ssl, (unsigned char *) buf, sizeof(buf));
+}
+
+static int smtp_write(char *buf, int len)
+{
+	return ssl_write(&ssl, (unsigned char *) buf, len);
+}
+
+static int smtps_init(void)
+{
+	havege_init(&hs);
+	memset(&ssn, 0, sizeof(ssn));
+	if (ssl_init(&ssl))
+		return -1;
+	ssl_set_endpoint(&ssl, SSL_IS_CLIENT);
+	ssl_set_authmode(&ssl, SSL_VERIFY_NONE);
+	ssl_set_rng(&ssl, havege_rand, &hs);
+	ssl_set_bio(&ssl, ps_recv, &fd, ps_send, &fd);
+	ssl_set_ciphers(&ssl, ssl_default_ciphers);
+	ssl_set_session(&ssl, 1, 600, &ssn);
+	return 0;
+}
+
+static int smtps_free(void)
+{
+	ssl_close_notify(&ssl);
+	ssl_free(&ssl);
+	return 0;
+}
+
+#else
+
+#define smtps_init()		(0)
+#define smtps_free()		(0)
+
+static int smtp_read(char *buf, int len)
+{
+	return read(fd, buf, sizeof(buf));
+}
+
+static int smtp_write(char *buf, int len)
+{
+	return write(fd, buf, len);
+}
+
 #endif
 
 static char *b64 =
@@ -154,15 +201,9 @@ static int xread(int fd, char *buf, int len)
 	return nr;
 }
 
-static void print(char *buf, int len)
-{
-	write(STDOUT_FILENO, buf, len);
-}
-
 static int smtp_connect(char *addr, char *port)
 {
 	struct addrinfo hints, *addrinfo;
-	int fd;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -179,7 +220,16 @@ static int smtp_connect(char *addr, char *port)
 		return -1;
 	}
 	freeaddrinfo(addrinfo);
-	return fd;
+	if (smtps_init())
+		return -1;
+	return 0;
+}
+
+static int smtp_close(void)
+{
+	smtps_free();
+	close(fd);
+	return 0;
 }
 
 static int reply_line(char *dst, int len)
@@ -189,17 +239,10 @@ static int reply_line(char *dst, int len)
 	while (nr < len) {
 		int ml;
 		if (!buf_cur || buf_cur >= buf_end) {
-#ifdef SSL
-			int buf_len = ssl_read(&ssl, (unsigned char *) buf,
-						sizeof(buf));
-#else
-			int buf_len = read(fd, buf, sizeof(buf));
-#endif
+			int buf_len = smtp_read(buf, sizeof(buf));
 			if (buf_len <= 0)
 				return -1;
-#ifdef DEBUG
-			print(buf, buf_len);
-#endif
+			DPRINT(buf, buf_len);
 			buf_cur = buf;
 			buf_end = buf + buf_len;
 		}
@@ -218,36 +261,25 @@ static int reply_line(char *dst, int len)
 	return nr;
 }
 
-static int smtp_write(char *s, int len)
-{
-#ifdef DEBUG
-	print(s, len);
-#endif
-#ifdef SSL
-	return ssl_write(&ssl, (unsigned char *) s, len);
-#else
-	return write(fd, s, len);
-#endif
-}
-
 static int smtp_xwrite(char *buf, int len)
 {
 	int nw = 0;
 	while (nw < len) {
 		int ret = smtp_write(buf + nw, len - nw);
+		DPRINT(buf + nw, len - nw);
 		if (ret == -1 && (errno == EAGAIN || errno == EINTR))
 			continue;
 		if (ret < 0)
 			break;
 		nw += ret;
 	}
-	fsync(fd);
 	return nw;
 }
 
 static void send_cmd(char *cmd)
 {
 	smtp_write(cmd, strlen(cmd));
+	DPRINT(cmd, strlen(cmd));
 }
 
 static int is_eoc(char *s, int len)
@@ -352,30 +384,12 @@ int main(int argc, char *argv[])
 	if ((mail_len = xread(STDIN_FILENO, mail, sizeof(mail))) == -1)
 		return 1;
 	account = choose_account();
-	if ((fd = smtp_connect(account->server, account->port)) == -1)
+	if ((smtp_connect(account->server, account->port)) == -1)
 		return 1;
-#ifdef SSL
-	havege_init(&hs);
-	memset(&ssn, 0, sizeof(ssn));
-	if (ssl_init(&ssl))
-		return 1;
-	ssl_set_endpoint(&ssl, SSL_IS_CLIENT);
-	ssl_set_authmode(&ssl, SSL_VERIFY_NONE);
-	ssl_set_rng(&ssl, havege_rand, &hs);
-	ssl_set_bio(&ssl, ps_recv, &fd, ps_send, &fd);
-	ssl_set_ciphers(&ssl, ssl_default_ciphers);
-	ssl_set_session(&ssl, 1, 600, &ssn);
-#endif
 	ehlo();
 	login(account->user, account->pass);
 	write_mail(account);
 
-#ifdef SSL
-	ssl_close_notify(&ssl);
-#endif
-	close(fd);
-#ifdef SSL
-	ssl_free(&ssl);
-#endif
+	smtp_close();
 	return 0;
 }
