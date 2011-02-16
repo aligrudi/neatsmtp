@@ -1,7 +1,6 @@
 #define MAILLEN			(1 << 21)
 #define HOSTNAME		"hostname"
 #define DPRINT(msg, len)
-#define SSL
 
 struct account {
 	char *from;
@@ -9,6 +8,7 @@ struct account {
 	char *port;
 	char *user;
 	char *pass;
+	char *cert;
 } accounts [] = {
 	{"me@myserver.sth", "smtp.myserver.sth", "465", "me", "pass"},
 };

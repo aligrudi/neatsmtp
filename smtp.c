@@ -1,28 +1,21 @@
 /*
  * a simple smtp mail sender
  *
- * Copyright (C) 2010 Ali Gholami Rudi
+ * Copyright (C) 2010-2011 Ali Gholami Rudi
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License, as published by the
- * Free Software Foundation.
+ * This program is released under GNU GPL version 2.
  */
-#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include "config.h"
+#include "conn.h"
 
 #define BUFFSIZE		(1 << 12)
 #define ARRAY_SIZE(a)		(sizeof(a) / sizeof((a)[0]))
@@ -31,76 +24,9 @@
 static char buf[BUFFSIZE];
 static char *buf_cur;
 static char *buf_end;
-static int fd;
 static char mail[MAILLEN];
 static int mail_len;
-
-#ifdef SSL
-#include <polarssl/ssl.h>
-#include <polarssl/havege.h>
-
-static ssl_context ssl;
-static ssl_session ssn;
-static havege_state hs;
-
-static int ps_send(void *ctx, unsigned char *buf, int len)
-{
-	return write(*(int *) ctx, buf, len);
-}
-
-static int ps_recv(void *ctx, unsigned char *buf, int len)
-{
-	return read(*(int *) ctx, buf, len);
-}
-
-static int smtp_read(char *buf, int len)
-{
-	return ssl_read(&ssl, (unsigned char *) buf, sizeof(buf));
-}
-
-static int smtp_write(char *buf, int len)
-{
-	return ssl_write(&ssl, (unsigned char *) buf, len);
-}
-
-static int smtps_init(void)
-{
-	havege_init(&hs);
-	memset(&ssn, 0, sizeof(ssn));
-	if (ssl_init(&ssl))
-		return -1;
-	ssl_set_endpoint(&ssl, SSL_IS_CLIENT);
-	ssl_set_authmode(&ssl, SSL_VERIFY_NONE);
-	ssl_set_rng(&ssl, havege_rand, &hs);
-	ssl_set_bio(&ssl, ps_recv, &fd, ps_send, &fd);
-	ssl_set_ciphers(&ssl, ssl_default_ciphers);
-	ssl_set_session(&ssl, 1, 600, &ssn);
-	return 0;
-}
-
-static int smtps_free(void)
-{
-	ssl_close_notify(&ssl);
-	ssl_free(&ssl);
-	return 0;
-}
-
-#else
-
-#define smtps_init()		(0)
-#define smtps_free()		(0)
-
-static int smtp_read(char *buf, int len)
-{
-	return read(fd, buf, sizeof(buf));
-}
-
-static int smtp_write(char *buf, int len)
-{
-	return write(fd, buf, len);
-}
-
-#endif
+static struct conn *conn;
 
 static char *b64 =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -201,37 +127,6 @@ static int xread(int fd, char *buf, int len)
 	return nr;
 }
 
-static int smtp_connect(char *addr, char *port)
-{
-	struct addrinfo hints, *addrinfo;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
-
-	getaddrinfo(addr, port, &hints, &addrinfo);
-	fd = socket(addrinfo->ai_family, addrinfo->ai_socktype,
-			addrinfo->ai_protocol);
-
-	if (connect(fd, addrinfo->ai_addr, addrinfo->ai_addrlen) == -1) {
-		close(fd);
-		freeaddrinfo(addrinfo);
-		return -1;
-	}
-	freeaddrinfo(addrinfo);
-	if (smtps_init())
-		return -1;
-	return 0;
-}
-
-static int smtp_close(void)
-{
-	smtps_free();
-	close(fd);
-	return 0;
-}
-
 static int reply_line(char *dst, int len)
 {
 	int nr = 0;
@@ -239,7 +134,7 @@ static int reply_line(char *dst, int len)
 	while (nr < len) {
 		int ml;
 		if (!buf_cur || buf_cur >= buf_end) {
-			int buf_len = smtp_read(buf, sizeof(buf));
+			int buf_len = conn_read(conn, buf, sizeof(buf));
 			if (buf_len <= 0)
 				return -1;
 			DPRINT(buf, buf_len);
@@ -265,7 +160,7 @@ static int smtp_xwrite(char *buf, int len)
 {
 	int nw = 0;
 	while (nw < len) {
-		int ret = smtp_write(buf + nw, len - nw);
+		int ret = conn_write(conn, buf + nw, len - nw);
 		DPRINT(buf + nw, len - nw);
 		if (ret == -1 && (errno == EAGAIN || errno == EINTR))
 			continue;
@@ -278,7 +173,7 @@ static int smtp_xwrite(char *buf, int len)
 
 static void send_cmd(char *cmd)
 {
-	smtp_write(cmd, strlen(cmd));
+	conn_write(conn, cmd, strlen(cmd));
 	DPRINT(cmd, strlen(cmd));
 }
 
@@ -378,12 +273,13 @@ int main(int argc, char *argv[])
 	if ((mail_len = xread(STDIN_FILENO, mail, sizeof(mail))) == -1)
 		return 1;
 	account = choose_account();
-	if ((smtp_connect(account->server, account->port)) == -1)
+	conn = conn_connect(account->server, account->port, account->cert);
+	if (!conn)
 		return 1;
 	ehlo();
 	login(account->user, account->pass);
 	write_mail(account);
 
-	smtp_close();
+	conn_close(conn);
 	return 0;
 }
