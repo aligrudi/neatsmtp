@@ -161,11 +161,11 @@ static int smtp_xwrite(char *buf, int len)
 	int nw = 0;
 	while (nw < len) {
 		int ret = conn_write(conn, buf + nw, len - nw);
-		DPRINT(buf + nw, len - nw);
 		if (ret == -1 && (errno == EAGAIN || errno == EINTR))
 			continue;
 		if (ret < 0)
 			break;
+		DPRINT(buf + nw, ret);
 		nw += ret;
 	}
 	return nw;
