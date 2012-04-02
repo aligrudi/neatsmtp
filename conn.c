@@ -11,22 +11,23 @@
 #include <time.h>
 #include <unistd.h>
 #include <polarssl/ssl.h>
-#include <polarssl/havege.h>
+#include <polarssl/entropy.h>
+#include <polarssl/ctr_drbg.h>
 
 struct conn {
 	int fd;
 	ssl_context ssl;
 	ssl_session ssn;
-	havege_state hs;
+	ctr_drbg_context ctr_drbg;
 	x509_cert cert;
 };
 
-static int ps_send(void *ctx, unsigned char *buf, int len)
+static int ps_send(void *ctx, const unsigned char *buf, size_t len)
 {
 	return write(*(int *) ctx, buf, len);
 }
 
-static int ps_recv(void *ctx, unsigned char *buf, int len)
+static int ps_recv(void *ctx, unsigned char *buf, size_t len)
 {
 	return read(*(int *) ctx, buf, len);
 }
@@ -43,7 +44,9 @@ int conn_write(struct conn *conn, char *buf, int len)
 
 static int conns_init(struct conn *conn, char *certfile)
 {
-	havege_init(&conn->hs);
+	entropy_context entropy;
+	entropy_init(&entropy);
+	ctr_drbg_init(&conn->ctr_drbg, entropy_func, &entropy, NULL, 0);
 	if (ssl_init(&conn->ssl))
 		return 1;
 	ssl_set_endpoint(&conn->ssl, SSL_IS_CLIENT);
@@ -54,9 +57,9 @@ static int conns_init(struct conn *conn, char *certfile)
 	} else{
 		ssl_set_authmode(&conn->ssl, SSL_VERIFY_NONE);
 	}
-	ssl_set_rng(&conn->ssl, havege_rand, &conn->hs);
+	ssl_set_rng(&conn->ssl, ctr_drbg_random, &conn->ctr_drbg);
 	ssl_set_bio(&conn->ssl, ps_recv, &conn->fd, ps_send, &conn->fd);
-	ssl_set_ciphers(&conn->ssl, ssl_default_ciphers);
+	ssl_set_ciphersuites(&conn->ssl, ssl_default_ciphersuites);
 	ssl_set_session(&conn->ssl, 1, 600, &conn->ssn);
 	return ssl_handshake(&conn->ssl);
 }

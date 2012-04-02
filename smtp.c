@@ -1,7 +1,7 @@
 /*
  * a simple smtp mail sender
  *
- * Copyright (C) 2010-2011 Ali Gholami Rudi
+ * Copyright (C) 2010-2012 Ali Gholami Rudi
  *
  * This program is released under GNU GPL version 2.
  */
