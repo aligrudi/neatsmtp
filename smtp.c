@@ -270,7 +270,8 @@ static struct account *choose_account(void)
 int main(int argc, char *argv[])
 {
 	struct account *account;
-	if ((mail_len = xread(STDIN_FILENO, mail, sizeof(mail))) == -1)
+	mail_len = xread(STDIN_FILENO, mail, sizeof(mail));
+	if (mail_len < 0 || mail_len >= sizeof(mail))
 		return 1;
 	account = choose_account();
 	conn = conn_connect(account->server, account->port, account->cert);
