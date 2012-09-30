@@ -1,4 +1,4 @@
-#define MAILLEN			(1 << 21)
+#define MAILLEN			(1 << 24)
 #define HOSTNAME		"hostname"
 #define DPRINT(msg, len)
 
