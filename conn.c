@@ -60,7 +60,7 @@ static int conns_init(struct conn *conn, char *certfile)
 	ssl_set_rng(&conn->ssl, ctr_drbg_random, &conn->ctr_drbg);
 	ssl_set_bio(&conn->ssl, ps_recv, &conn->fd, ps_send, &conn->fd);
 	ssl_set_ciphersuites(&conn->ssl, ssl_default_ciphersuites);
-	ssl_set_session(&conn->ssl, 1, 600, &conn->ssn);
+	ssl_set_session(&conn->ssl, &conn->ssn);
 	return ssl_handshake(&conn->ssl);
 }
 
