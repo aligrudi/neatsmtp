@@ -254,9 +254,7 @@ static struct account *choose_account(void)
 	char *from = find_hdr("from:");
 	char *end = from + hdr_len(from);
 	int i;
-	if (!from)
-		return &accounts[0];
-	for (i = 0; i < ARRAY_SIZE(accounts); i++) {
+	for (i = 0; i < ARRAY_SIZE(accounts) && from; i++) {
 		char *pat = accounts[i].from;
 		int len = strlen(pat);
 		char *s = from;
@@ -264,7 +262,7 @@ static struct account *choose_account(void)
 			if (!strncmp(pat, s++, len))
 				return &accounts[i];
 	}
-	return &accounts[0];
+	return NULL;
 }
 
 int main(int argc, char *argv[])
@@ -274,13 +272,14 @@ int main(int argc, char *argv[])
 	if (mail_len < 0 || mail_len >= sizeof(mail))
 		return 1;
 	account = choose_account();
+	if (!account)
+		return 1;
 	conn = conn_connect(account->server, account->port, account->cert);
 	if (!conn)
 		return 1;
 	ehlo();
 	login(account->user, account->pass);
 	write_mail(account);
-
 	conn_close(conn);
 	return 0;
 }
