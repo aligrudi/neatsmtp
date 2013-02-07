@@ -1,6 +1,6 @@
 POLARPATH = /opt
 CC = cc
-CFLAGS = -Wall -Os -I$(POLARPATH)/include/
+CFLAGS = -Wall -O2 -I$(POLARPATH)/include/
 LDFLAGS = -L$(POLARPATH)/lib -lpolarssl
 
 all: smtp
