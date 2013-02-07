@@ -88,7 +88,7 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 	freeaddrinfo(addrinfo);
 
 	conn = malloc(sizeof(*conn));
-	memset(conn, 0, sizeof(conn));
+	memset(conn, 0, sizeof(*conn));
 	conn->fd = fd;
 	if (conns_init(conn, certfile)) {
 		free(conn);
