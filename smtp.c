@@ -22,8 +22,8 @@
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 
 static char buf[BUFFSIZE];
-static char *buf_cur;
-static char *buf_end;
+static int buf_len;
+static int buf_pos;
 static char mail[MAILLEN];
 static int mail_len;
 static struct conn *conn;
@@ -127,35 +127,30 @@ static int xread(int fd, char *buf, int len)
 	return nr;
 }
 
-static int reply_line(char *dst, int len)
+static int smtp_read(void)
 {
-	int nr = 0;
-	char *nl;
-	while (nr < len) {
-		int ml;
-		if (!buf_cur || buf_cur >= buf_end) {
-			int buf_len = conn_read(conn, buf, sizeof(buf));
-			if (buf_len <= 0)
-				return -1;
-			DPRINT(buf, buf_len);
-			buf_cur = buf;
-			buf_end = buf + buf_len;
-		}
-		ml = MIN(buf_end - buf_cur, len - nr);
-		if ((nl = memchr(buf_cur, '\n', ml))) {
-			nl++;
-			memcpy(dst + nr, buf_cur, nl - buf_cur);
-			nr += nl - buf_cur;
-			buf_cur = nl;
-			return nr;
-		}
-		memcpy(dst + nr, buf_cur, ml);
-		nr += ml;
-		buf_cur += ml;
+	if (buf_pos == buf_len) {
+		buf_len = conn_read(conn, buf, sizeof(buf));
+		buf_pos = 0;
 	}
-	return nr;
+	return buf_pos < buf_len ? (unsigned char) buf[buf_pos++] : -1;
 }
 
+static int smtp_line(char *dst, int len)
+{
+	int i = 0;
+	int c;
+	while (i < len) {
+		c = smtp_read();
+		if (c < 0)
+			return -1;
+		dst[i++] = c;
+		if (c == '\n')
+			break;
+	}
+	DPRINT(dst, i);
+	return i;
+}
 static int smtp_xwrite(char *buf, int len)
 {
 	int nw = 0;
@@ -179,47 +174,47 @@ static void send_cmd(char *cmd)
 
 static int is_eoc(char *s, int len)
 {
-	return isdigit(s[0]) && isdigit(s[1]) && isdigit(s[2]) && isspace(s[3]);
+	return len > 3 && isdigit(s[0]) && isdigit(s[1]) &&
+			isdigit(s[2]) && isspace(s[3]);
 }
 
-static void ehlo(void)
+static int ehlo(void)
 {
 	char line[BUFFSIZE];
 	int len;
-	len = reply_line(line, sizeof(line));
+	len = smtp_line(line, sizeof(line));
 	send_cmd("EHLO " HOSTNAME "\r\n");
 	do {
-		len = reply_line(line, sizeof(line));
-	} while (!is_eoc(line, len));
+		len = smtp_line(line, sizeof(line));
+	} while (len > 0 && !is_eoc(line, len));
+	return len <= 0;
 }
 
-static void login(char *user, char *pass)
+static int login(char *user, char *pass)
 {
 	char line[BUFFSIZE];
-	int len;
 	char *s = line;
 	send_cmd("AUTH LOGIN\r\n");
-	len = reply_line(line, sizeof(line));
+	smtp_line(line, sizeof(line));
 	s = putb64(s, user, strlen(user));
 	s = putstr(s, "\r\n");
 	send_cmd(line);
-	len = reply_line(line, sizeof(line));
+	smtp_line(line, sizeof(line));
 	s = line;
 	s = putb64(s, pass, strlen(pass));
 	s = putstr(s, "\r\n");
 	send_cmd(line);
-	len = reply_line(line, sizeof(line));
+	return smtp_line(line, sizeof(line)) <= 0;
 }
 
 static int write_mail(struct account *account)
 {
 	char line[BUFFSIZE];
-	int len;
 	char *to_hdrs[] = {"to:", "cc:", "bcc:"};
 	int i;
 	sprintf(line, "MAIL FROM:<%s>\r\n", account->from);
 	send_cmd(line);
-	len = reply_line(line, sizeof(line));
+	smtp_line(line, sizeof(line));
 
 	for (i = 0; i < ARRAY_SIZE(to_hdrs); i++) {
 		char *hdr, *end, *s;
@@ -233,19 +228,21 @@ static int write_mail(struct account *account)
 			if (at && at > addr && *(at + 1)) {
 				sprintf(line, "RCPT TO:<%s>\r\n", addr);
 				send_cmd(line);
-				len = reply_line(line, sizeof(line));
+				smtp_line(line, sizeof(line));
 			}
 		}
 	}
 
 	send_cmd("DATA\r\n");
-	len = reply_line(line, sizeof(line));
+	if (smtp_line(line, sizeof(line)) <= 0)
+		return 1;
 	if (smtp_xwrite(mail, mail_len) != mail_len)
-		return -1;
+		return 1;
 	send_cmd("\r\n.\r\n");
-	len = reply_line(line, sizeof(line));
+	if (smtp_line(line, sizeof(line)) <= 0)
+		return 1;
 	send_cmd("QUIT\r\n");
-	len = reply_line(line, sizeof(line));
+	smtp_line(line, sizeof(line));
 	return 0;
 }
 
@@ -277,9 +274,15 @@ int main(int argc, char *argv[])
 	conn = conn_connect(account->server, account->port, account->cert);
 	if (!conn)
 		return 1;
-	ehlo();
-	login(account->user, account->pass);
-	write_mail(account);
+	if (ehlo())
+		goto fail;
+	if (login(account->user, account->pass))
+		goto fail;
+	if (write_mail(account))
+		goto fail;
 	conn_close(conn);
 	return 0;
+fail:
+	conn_close(conn);
+	return 1;
 }
