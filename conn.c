@@ -19,7 +19,7 @@ struct conn {
 	ssl_context ssl;
 	ssl_session ssn;
 	ctr_drbg_context ctr_drbg;
-	x509_cert cert;
+	x509_crt cert;
 };
 
 static int ps_send(void *ctx, const unsigned char *buf, size_t len)
@@ -51,7 +51,7 @@ static int conns_init(struct conn *conn, char *certfile)
 		return 1;
 	ssl_set_endpoint(&conn->ssl, SSL_IS_CLIENT);
 	if (certfile) {
-		x509parse_crtfile(&conn->cert, certfile);
+		x509_crt_parse_file(&conn->cert, certfile);
 		ssl_set_ca_chain(&conn->ssl, &conn->cert, NULL, NULL);
 		ssl_set_authmode(&conn->ssl, SSL_VERIFY_REQUIRED);
 	} else{
@@ -59,7 +59,7 @@ static int conns_init(struct conn *conn, char *certfile)
 	}
 	ssl_set_rng(&conn->ssl, ctr_drbg_random, &conn->ctr_drbg);
 	ssl_set_bio(&conn->ssl, ps_recv, &conn->fd, ps_send, &conn->fd);
-	ssl_set_ciphersuites(&conn->ssl, ssl_default_ciphersuites);
+	ssl_set_ciphersuites(&conn->ssl, ssl_list_ciphersuites());
 	ssl_set_session(&conn->ssl, &conn->ssn);
 	return ssl_handshake(&conn->ssl);
 }
@@ -100,7 +100,7 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 int conn_close(struct conn *conn)
 {
 	ssl_close_notify(&conn->ssl);
-	x509_free(&conn->cert);
+	x509_crt_free(&conn->cert);
 	ssl_free(&conn->ssl);
 
 	close(conn->fd);
