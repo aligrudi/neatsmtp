@@ -18,15 +18,16 @@
 #include "conn.h"
 
 #define LNLEN			(1 << 12)
+#define HDLEN			(1 << 15)
 #define ARRAY_SIZE(a)		(sizeof(a) / sizeof((a)[0]))
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 
-static char buf[LNLEN];
+static char buf[LNLEN];		/* SMTP reply buffer */
 static int buf_len;
 static int buf_pos;
-static char mail[MAILLEN];
+static char mail[HDLEN];	/* the first HDLEN bytes of the mail */
 static int mail_len;
-static struct conn *conn;
+static struct conn *conn;	/* the SMTP connection */
 
 static char *b64_chr =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -212,9 +213,10 @@ static int login(char *user, char *pass)
 
 static int mail_data(struct account *account)
 {
+	char buf[HDLEN];
 	char cmd[LNLEN];
 	char *to_hdrs[] = {"to:", "cc:", "bcc:"};
-	int i;
+	int i, buflen;
 	sprintf(cmd, "MAIL FROM:<%s>\r\n", account->from);
 	smtp_cmd(cmd);
 	if (!smtp_ok(smtp_line()))
@@ -236,12 +238,15 @@ static int mail_data(struct account *account)
 			}
 		}
 	}
-
 	smtp_cmd("DATA\r\n");
 	if (!smtp_ok(smtp_line()))
 		return 1;
-	if (smtp_xwrite(mail, mail_len) != mail_len)
-		return 1;
+	memcpy(buf, mail, mail_len);
+	buflen = mail_len;
+	do {
+		if (smtp_xwrite(buf, buflen) != buflen)
+			return 1;
+	} while ((buflen = xread(0, buf, sizeof(buf))) > 0);
 	smtp_cmd("\r\n.\r\n");
 	if (!smtp_ok(smtp_line()))
 		return 1;
@@ -269,8 +274,8 @@ static struct account *choose_account(void)
 int main(int argc, char *argv[])
 {
 	struct account *account;
-	mail_len = xread(STDIN_FILENO, mail, sizeof(mail));
-	if (mail_len < 0 || mail_len >= sizeof(mail))
+	mail_len = xread(0, mail, sizeof(mail));
+	if (mail_len <= 0)
 		return 1;
 	account = choose_account();
 	if (!account)
