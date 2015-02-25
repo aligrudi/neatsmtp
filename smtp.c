@@ -1,9 +1,9 @@
 /*
- * a simple smtp mail sender
+ * A simple SMTP mail sender
  *
- * Copyright (C) 2010-2013 Ali Gholami Rudi
+ * Copyright (C) 2010-2015 Ali Gholami Rudi <ali at rudi dot ir>
  *
- * This program is released under the modified BSD license.
+ * This program is released under the Modified BSD license.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -17,59 +17,54 @@
 #include "config.h"
 #include "conn.h"
 
-#define BUFFSIZE		(1 << 12)
+#define LNLEN			(1 << 12)
 #define ARRAY_SIZE(a)		(sizeof(a) / sizeof((a)[0]))
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 
-static char buf[BUFFSIZE];
+static char buf[LNLEN];
 static int buf_len;
 static int buf_pos;
 static char mail[MAILLEN];
 static int mail_len;
 static struct conn *conn;
 
-static char *b64 =
+static char *b64_chr =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static void b64_num(char *s, unsigned long num)
+/* encode 3 bytes in base64 */
+static void b64_word(char *s, unsigned num)
 {
-	s[3] = b64[num & 0x3f];
+	s[3] = b64_chr[num & 0x3f];
 	num >>= 6;
-	s[2] = b64[num & 0x3f];
+	s[2] = b64_chr[num & 0x3f];
 	num >>= 6;
-	s[1] = b64[num & 0x3f];
+	s[1] = b64_chr[num & 0x3f];
 	num >>= 6;
-	s[0] = b64[num & 0x3f];
+	s[0] = b64_chr[num & 0x3f];
 }
 
-static char *putb64(char *dst, char *src, int len)
+/* base64 encoding; returns a static buffer */
+static char *b64(char *src, int len)
 {
-	int n = len / 3;
+	static char dst[LNLEN];
+	int n = (len + 2) / 3;
 	int i;
-	if (n * 3 != len)
-		n++;
 	for (i = 0; i < n; i++) {
 		char *s = src + 3 * i;
-		unsigned c0 = (unsigned) s[0];
-		unsigned c1 = s + 1 < src + len ? (unsigned) s[1] : 0;
-		unsigned c2 = s + 2 < src + len ? (unsigned) s[2] : 0;
-		unsigned long word = (c0 << 16) | (c1 << 8) | c2;
-		b64_num(dst + 4 * i, word);
+		unsigned c0 = (unsigned char) s[0];
+		unsigned c1 = s + 1 < src + len ? (unsigned char) s[1] : 0;
+		unsigned c2 = s + 2 < src + len ? (unsigned char) s[2] : 0;
+		b64_word(dst + 4 * i, (c0 << 16) | (c1 << 8) | c2);
 	}
-	if (len % 3)
-		for (i = len % 3; i < 3; i++)
-			dst[4 * len - 3 + i] = '=';
+	if (len % 3 >= 1)
+		dst[4 * n - 1] = '=';
+	if (len % 3 == 1)
+		dst[4 * n - 2] = '=';
 	dst[n * 4] = '\0';
-	return dst + n * 4;
+	return dst;
 }
 
-static char *putstr(char *dst, char *src)
-{
-	int len = strchr(src, '\0') - src;
-	memcpy(dst, src, len + 1);
-	return dst + len;
-}
-
+/* copy the address in s to dst */
 static char *cutaddr(char *dst, char *s, int len)
 {
 	static char *addrseps = "<>()%!~* \t\r\n,\"'%";
@@ -82,21 +77,18 @@ static char *cutaddr(char *dst, char *s, int len)
 	return s;
 }
 
-static char *find_hdr(char *hdr)
+static char *hdr_val(char *hdr)
 {
 	char *s = mail;
 	int len = strlen(hdr);
 	char *end = mail + mail_len - len;
-	while (s < end) {
-		char *r;
-		if (!strncasecmp(s, hdr, len))
-			return s;
-		r = memchr(s, '\n', end - s);
+	while (s < end && strncasecmp(s, hdr, len)) {
+		char *r = memchr(s, '\n', end - s);
 		if (!r || r == s)
 			return NULL;
 		s = r + 1;
 	}
-	return s;
+	return s < end ? s : NULL;
 }
 
 static int hdr_len(char *hdr)
@@ -127,6 +119,7 @@ static int xread(int fd, char *buf, int len)
 	return nr;
 }
 
+/* read one character from the SMTP server */
 static int smtp_read(void)
 {
 	if (buf_pos == buf_len) {
@@ -136,27 +129,44 @@ static int smtp_read(void)
 	return buf_pos < buf_len ? (unsigned char) buf[buf_pos++] : -1;
 }
 
-static int smtp_line(char *dst, int len)
+/* read a line from the SMTP server; returns a static buffer */
+static char *smtp_line(void)
 {
+	static char dst[LNLEN];
 	int i = 0;
 	int c;
-	while (i < len) {
+	while (i < sizeof(dst)) {
 		c = smtp_read();
 		if (c < 0)
-			return -1;
+			return NULL;
 		dst[i++] = c;
 		if (c == '\n')
 			break;
 	}
+	dst[i] = '\0';
 	DPRINT(dst, i);
-	return i;
+	return dst;
 }
+
+/* check the error code of an SMTP reply */
+static int smtp_ok(char *s)
+{
+	return s && atoi(s) < 400;
+}
+
+/* check if s is the last line of an SMTP reply */
+static int smtp_eoc(char *s)
+{
+	return isdigit((unsigned char) s[0]) && isdigit((unsigned char) s[1]) &&
+			isdigit((unsigned char) s[2]) && isspace((unsigned char) s[3]);
+}
+
 static int smtp_xwrite(char *buf, int len)
 {
 	int nw = 0;
 	while (nw < len) {
 		int ret = conn_write(conn, buf + nw, len - nw);
-		if (ret == -1 && (errno == EAGAIN || errno == EINTR))
+		if (ret < 0 && (errno == EAGAIN || errno == EINTR))
 			continue;
 		if (ret < 0)
 			break;
@@ -166,89 +176,83 @@ static int smtp_xwrite(char *buf, int len)
 	return nw;
 }
 
-static void send_cmd(char *cmd)
+/* send a command to the SMTP server */
+static void smtp_cmd(char *cmd)
 {
 	conn_write(conn, cmd, strlen(cmd));
 	DPRINT(cmd, strlen(cmd));
 }
 
-static int is_eoc(char *s, int len)
-{
-	return len > 3 && isdigit(s[0]) && isdigit(s[1]) &&
-			isdigit(s[2]) && isspace(s[3]);
-}
-
 static int ehlo(void)
 {
-	char line[BUFFSIZE];
-	int len;
-	len = smtp_line(line, sizeof(line));
-	send_cmd("EHLO " HOSTNAME "\r\n");
+	char *ret;
+	if (!smtp_ok(smtp_line()))
+		return 1;
+	smtp_cmd("EHLO " HOSTNAME "\r\n");
 	do {
-		len = smtp_line(line, sizeof(line));
-	} while (len > 0 && !is_eoc(line, len));
-	return len <= 0;
+		ret = smtp_line();
+	} while (ret && !smtp_eoc(ret));
+	return !smtp_ok(ret);
 }
 
 static int login(char *user, char *pass)
 {
-	char line[BUFFSIZE];
-	char *s = line;
-	send_cmd("AUTH LOGIN\r\n");
-	smtp_line(line, sizeof(line));
-	s = putb64(s, user, strlen(user));
-	s = putstr(s, "\r\n");
-	send_cmd(line);
-	smtp_line(line, sizeof(line));
-	s = line;
-	s = putb64(s, pass, strlen(pass));
-	s = putstr(s, "\r\n");
-	send_cmd(line);
-	return smtp_line(line, sizeof(line)) <= 0;
+	char cmd[LNLEN];
+	smtp_cmd("AUTH LOGIN\r\n");
+	if (!smtp_ok(smtp_line()))
+		return 1;
+	sprintf(cmd, "%s\r\n", b64(user, strlen(user)));
+	smtp_cmd(cmd);
+	if (!smtp_ok(smtp_line()))
+		return 1;
+	sprintf(cmd, "%s\r\n", b64(pass, strlen(pass)));
+	smtp_cmd(cmd);
+	return !smtp_ok(smtp_line());
 }
 
-static int write_mail(struct account *account)
+static int mail_data(struct account *account)
 {
-	char line[BUFFSIZE];
+	char cmd[LNLEN];
 	char *to_hdrs[] = {"to:", "cc:", "bcc:"};
 	int i;
-	sprintf(line, "MAIL FROM:<%s>\r\n", account->from);
-	send_cmd(line);
-	smtp_line(line, sizeof(line));
-
+	sprintf(cmd, "MAIL FROM:<%s>\r\n", account->from);
+	smtp_cmd(cmd);
+	if (!smtp_ok(smtp_line()))
+		return 1;
 	for (i = 0; i < ARRAY_SIZE(to_hdrs); i++) {
 		char *hdr, *end, *s;
-		char addr[BUFFSIZE];
-		if (!(hdr = find_hdr(to_hdrs[i])))
+		char addr[LNLEN];
+		if (!(hdr = hdr_val(to_hdrs[i])))
 			continue;
 		end = hdr + hdr_len(hdr);
 		s = hdr;
 		while ((s = cutaddr(addr, s, end - s)) && s < end) {
 			char *at = strchr(addr, '@');
 			if (at && at > addr && *(at + 1)) {
-				sprintf(line, "RCPT TO:<%s>\r\n", addr);
-				send_cmd(line);
-				smtp_line(line, sizeof(line));
+				sprintf(cmd, "RCPT TO:<%s>\r\n", addr);
+				smtp_cmd(cmd);
+				if (!smtp_ok(smtp_line()))
+					return 1;
 			}
 		}
 	}
 
-	send_cmd("DATA\r\n");
-	if (smtp_line(line, sizeof(line)) <= 0)
+	smtp_cmd("DATA\r\n");
+	if (!smtp_ok(smtp_line()))
 		return 1;
 	if (smtp_xwrite(mail, mail_len) != mail_len)
 		return 1;
-	send_cmd("\r\n.\r\n");
-	if (smtp_line(line, sizeof(line)) <= 0)
+	smtp_cmd("\r\n.\r\n");
+	if (!smtp_ok(smtp_line()))
 		return 1;
-	send_cmd("QUIT\r\n");
-	smtp_line(line, sizeof(line));
+	smtp_cmd("QUIT\r\n");
+	smtp_line();
 	return 0;
 }
 
 static struct account *choose_account(void)
 {
-	char *from = find_hdr("from:");
+	char *from = hdr_val("from:");
 	char *end = from + hdr_len(from);
 	int i;
 	for (i = 0; i < ARRAY_SIZE(accounts) && from; i++) {
@@ -278,7 +282,7 @@ int main(int argc, char *argv[])
 		goto fail;
 	if (login(account->user, account->pass))
 		goto fail;
-	if (write_mail(account))
+	if (mail_data(account))
 		goto fail;
 	conn_close(conn);
 	return 0;
