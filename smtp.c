@@ -1,7 +1,7 @@
 /*
  * A simple SMTP mail sender
  *
- * Copyright (C) 2010-2015 Ali Gholami Rudi <ali at rudi dot ir>
+ * Copyright (C) 2010-2016 Ali Gholami Rudi <ali at rudi dot ir>
  *
  * This program is released under the Modified BSD license.
  */
@@ -14,7 +14,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
-#include "config.h"
+#include "conf.h"
 #include "conn.h"
 
 #define LNLEN			(1 << 12)

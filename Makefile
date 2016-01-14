@@ -1,13 +1,20 @@
-POLARPATH = /opt
+# common options
 CC = cc
-CFLAGS = -Wall -O2 -I$(POLARPATH)/include/
-LDFLAGS = -L$(POLARPATH)/lib -lpolarssl
+
+# for openssl
+OBJS = smtp.o conn_openssl.o
+CFLAGS = -Wall -O2
+LDFLAGS = -lssl
+
+# for mbedtls (polarssl)
+#OBJS = smtp.o conn_mbedtls.o
+#CFLAGS = -Wall -O2
+#LDFLAGS = -lpolarssl
 
 all: smtp
-.c.o:
+%.o: %.c conf.h
 	$(CC) -c $(CFLAGS) $<
-smtp.o: config.h
-smtp: smtp.o conn.o
-	$(CC) -o $@ $^ $(LDFLAGS)
+smtp: $(OBJS)
+	$(CC) -o $@ $(OBJS) $(LDFLAGS)
 clean:
 	rm -f *.o smtp
