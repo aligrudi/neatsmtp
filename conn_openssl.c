@@ -50,7 +50,7 @@ static int conns_init(struct conn *conn, char *certfile)
 	SSL_set_fd(conn->ssl, conn->fd);
 	if (SSL_connect(conn->ssl) != 1)
 		return 1;
-	if (SSL_get_verify_result(conn->ssl) != X509_V_OK)
+	if (certfile && SSL_get_verify_result(conn->ssl) != X509_V_OK)
 		return 1;
 	return 0;
 }
