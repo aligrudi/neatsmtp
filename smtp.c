@@ -280,9 +280,11 @@ int main(int argc, char *argv[])
 	account = choose_account();
 	if (!account)
 		return 1;
-	conn = conn_connect(account->server, account->port, account->cert);
+	conn = conn_connect(account->server, account->port);
 	if (!conn)
 		return 1;
+	if (conn_tls(conn, account->cert))
+		goto fail;
 	if (ehlo())
 		goto fail;
 	if (login(account->user, account->pass))

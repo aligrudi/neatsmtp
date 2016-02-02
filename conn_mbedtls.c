@@ -16,6 +16,7 @@
 
 struct conn {
 	int fd;
+	int tls;
 	ssl_context ssl;
 	ssl_session ssn;
 	ctr_drbg_context ctr_drbg;
@@ -34,15 +35,19 @@ static int ps_recv(void *ctx, unsigned char *buf, size_t len)
 
 int conn_read(struct conn *conn, char *buf, int len)
 {
-	return ssl_read(&conn->ssl, (unsigned char *) buf, sizeof(buf));
+	if (conn->tls)
+		return ssl_read(&conn->ssl, (unsigned char *) buf, len);
+	return read(conn->fd, buf, len);
 }
 
 int conn_write(struct conn *conn, char *buf, int len)
 {
-	return ssl_write(&conn->ssl, (unsigned char *) buf, len);
+	if (conn->tls)
+		return ssl_write(&conn->ssl, (unsigned char *) buf, len);
+	return write(conn->fd, buf, len);
 }
 
-static int conns_init(struct conn *conn, char *certfile)
+int conn_tls(struct conn *conn, char *certfile)
 {
 	entropy_context entropy;
 	entropy_init(&entropy);
@@ -61,6 +66,7 @@ static int conns_init(struct conn *conn, char *certfile)
 	ssl_set_bio(&conn->ssl, ps_recv, &conn->fd, ps_send, &conn->fd);
 	ssl_set_ciphersuites(&conn->ssl, ssl_list_ciphersuites());
 	ssl_set_session(&conn->ssl, &conn->ssn);
+	conn->tls = 1;
 	return ssl_handshake(&conn->ssl);
 }
 
@@ -90,19 +96,16 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 	conn = malloc(sizeof(*conn));
 	memset(conn, 0, sizeof(*conn));
 	conn->fd = fd;
-	if (conns_init(conn, certfile)) {
-		free(conn);
-		return NULL;
-	}
 	return conn;
 }
 
 int conn_close(struct conn *conn)
 {
-	ssl_close_notify(&conn->ssl);
-	x509_crt_free(&conn->cert);
-	ssl_free(&conn->ssl);
-
+	if (conn->tls) {
+		ssl_close_notify(&conn->ssl);
+		x509_crt_free(&conn->cert);
+		ssl_free(&conn->ssl);
+	}
 	close(conn->fd);
 	free(conn);
 	return 0;

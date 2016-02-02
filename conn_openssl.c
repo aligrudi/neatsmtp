@@ -25,15 +25,19 @@ struct conn {
 
 int conn_read(struct conn *conn, char *buf, int len)
 {
-	return SSL_read(conn->ssl, buf, sizeof(buf) - 1);
+	if (conn->ssl)
+		return SSL_read(conn->ssl, buf, len);
+	return read(conn->fd, buf, len);
 }
 
 int conn_write(struct conn *conn, char *buf, int len)
 {
-	return SSL_write(conn->ssl, buf, len);
+	if (conn->ssl)
+		return SSL_write(conn->ssl, buf, len);
+	return write(conn->fd, buf, len);
 }
 
-static int conns_init(struct conn *conn, char *certfile)
+int conn_tls(struct conn *conn, char *certfile)
 {
 	SSLeay_add_ssl_algorithms();
 	SSL_load_error_strings();
@@ -81,18 +85,16 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 	conn = malloc(sizeof(*conn));
 	memset(conn, 0, sizeof(*conn));
 	conn->fd = fd;
-	if (conns_init(conn, certfile)) {
-		free(conn);
-		return NULL;
-	}
 	return conn;
 }
 
 int conn_close(struct conn *conn)
 {
-	SSL_shutdown(conn->ssl);
-	SSL_free(conn->ssl);
-	SSL_CTX_free(conn->ctx);
+	if (conn->ssl) {
+		SSL_shutdown(conn->ssl);
+		SSL_free(conn->ssl);
+		SSL_CTX_free(conn->ctx);
+	}
 	close(conn->fd);
 	free(conn);
 	return 0;
