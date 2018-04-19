@@ -9,6 +9,7 @@ struct account {
 	char *user;
 	char *pass;
 	char *cert;	/* root certificates PEM file */
+	int stls;	/* enable starttls */
 } accounts [] = {
 	{"me@myserver.sth", "smtp.myserver.sth", "465", "me", "pass"},
 };

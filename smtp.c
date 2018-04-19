@@ -1,9 +1,19 @@
 /*
- * A simple SMTP mail sender
+ * A NEAT SMTP MAIL SENDER
  *
- * Copyright (C) 2010-2016 Ali Gholami Rudi <ali at rudi dot ir>
+ * Copyright (C) 2010-2018 Ali Gholami Rudi <ali at rudi dot ir>
  *
- * This program is released under the Modified BSD license.
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -184,11 +194,14 @@ static void smtp_cmd(char *cmd)
 	DPRINT(cmd, strlen(cmd));
 }
 
+static int welcome(void)
+{
+	return !smtp_ok(smtp_line());
+}
+
 static int ehlo(void)
 {
 	char *ret;
-	if (!smtp_ok(smtp_line()))
-		return 1;
 	smtp_cmd("EHLO " HOSTNAME "\r\n");
 	do {
 		ret = smtp_line();
@@ -208,6 +221,12 @@ static int login(char *user, char *pass)
 		return 1;
 	sprintf(cmd, "%s\r\n", b64(pass, strlen(pass)));
 	smtp_cmd(cmd);
+	return !smtp_ok(smtp_line());
+}
+
+static int starttls(void)
+{
+	smtp_cmd("STARTTLS\r\n");
 	return !smtp_ok(smtp_line());
 }
 
@@ -283,10 +302,21 @@ int main(int argc, char *argv[])
 	conn = conn_connect(account->server, account->port);
 	if (!conn)
 		return 1;
-	if (conn_tls(conn, account->cert))
+	if (!account->stls)
+		if (conn_tls(conn, account->cert))
+			goto fail;
+	if (welcome())
 		goto fail;
 	if (ehlo())
 		goto fail;
+	if (account->stls) {
+		if (starttls())
+			goto fail;
+		if (conn_tls(conn, account->cert))
+			goto fail;
+		if (ehlo())
+			goto fail;
+	}
 	if (login(account->user, account->pass))
 		goto fail;
 	if (mail_data(account))
