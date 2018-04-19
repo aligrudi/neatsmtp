@@ -16,5 +16,6 @@ all: smtp
 	$(CC) -c $(CFLAGS) $<
 smtp: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
+	chmod 100 $@
 clean:
 	rm -f *.o smtp
