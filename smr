@@ -1,0 +1,23 @@
+#!/bin/sh
+
+QDIR="$HOME/.smq"
+
+# change into $QDIR
+cd "$QDIR" || exit 1
+
+if test "`echo mail*`" = 'mail*'
+then
+	echo "no mail in $QDIR"
+	exit 0
+fi
+
+# process all mails
+for m in mail*
+do
+	if smtp <$m; then
+		rm "$m"
+		echo "$m sent successfully"
+	else
+		echo "failed to send $m"
+	fi
+done

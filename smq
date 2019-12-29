@@ -1,0 +1,21 @@
+#!/bin/sh
+
+QDIR=$HOME/.smq
+
+umask 077
+
+if test ! -d "$QDIR"; then
+	mkdir -p "$QDIR" || exit 1
+fi
+cd "$QDIR" || exit 1
+
+PREF="mail"
+i=0
+while test -f "$PREF$i"
+do
+	i=`expr $i + 1`
+done
+MAIL=$PREF$i
+
+echo "$@" > "$MAIL" || exit 1
+cat > "$MAIL" || exit 1
