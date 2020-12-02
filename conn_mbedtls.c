@@ -10,64 +10,59 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <polarssl/ssl.h>
-#include <polarssl/entropy.h>
-#include <polarssl/ctr_drbg.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/net_sockets.h>
 
 struct conn {
 	int fd;
 	int tls;
-	ssl_context ssl;
-	ssl_session ssn;
-	ctr_drbg_context ctr_drbg;
-	x509_crt cert;
+	mbedtls_ssl_context ssl;
+	mbedtls_ssl_session ssn;
+	mbedtls_ctr_drbg_context ctr_drbg;
+	mbedtls_x509_crt cert;
+	mbedtls_ssl_config conf;
 };
-
-static int ps_send(void *ctx, const unsigned char *buf, size_t len)
-{
-	return write(*(int *) ctx, buf, len);
-}
-
-static int ps_recv(void *ctx, unsigned char *buf, size_t len)
-{
-	return read(*(int *) ctx, buf, len);
-}
 
 int conn_read(struct conn *conn, char *buf, int len)
 {
 	if (conn->tls)
-		return ssl_read(&conn->ssl, (unsigned char *) buf, len);
+		return mbedtls_ssl_read(&conn->ssl, (unsigned char *) buf, len);
 	return read(conn->fd, buf, len);
 }
 
 int conn_write(struct conn *conn, char *buf, int len)
 {
 	if (conn->tls)
-		return ssl_write(&conn->ssl, (unsigned char *) buf, len);
+		return mbedtls_ssl_write(&conn->ssl, (unsigned char *) buf, len);
 	return write(conn->fd, buf, len);
 }
 
 int conn_tls(struct conn *conn, char *certfile)
 {
-	entropy_context entropy;
-	entropy_init(&entropy);
-	ctr_drbg_init(&conn->ctr_drbg, entropy_func, &entropy, NULL, 0);
-	if (ssl_init(&conn->ssl))
-		return 1;
-	ssl_set_endpoint(&conn->ssl, SSL_IS_CLIENT);
+	mbedtls_entropy_context entropy;
+	mbedtls_entropy_init(&entropy);
+	mbedtls_ctr_drbg_init(&conn->ctr_drbg);
+	mbedtls_ssl_init(&conn->ssl);
+	mbedtls_ssl_config_init(&conn->conf);
+	mbedtls_ctr_drbg_seed(&conn->ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
+	mbedtls_ssl_config_defaults(&conn->conf, MBEDTLS_SSL_IS_CLIENT,
+			MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+	mbedtls_ssl_conf_rng(&conn->conf, mbedtls_ctr_drbg_random, &conn->ctr_drbg);
 	if (certfile) {
-		x509_crt_parse_file(&conn->cert, certfile);
-		ssl_set_ca_chain(&conn->ssl, &conn->cert, NULL, NULL);
-		ssl_set_authmode(&conn->ssl, SSL_VERIFY_REQUIRED);
-	} else{
-		ssl_set_authmode(&conn->ssl, SSL_VERIFY_NONE);
+		mbedtls_x509_crt_parse_file(&conn->cert, certfile);
+		mbedtls_ssl_conf_ca_chain(&conn->conf, &conn->cert, NULL);
+		mbedtls_ssl_conf_authmode(&conn->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+		mbedtls_ssl_conf_ca_chain(&conn->conf, &conn->cert, NULL);
+	} else {
+		mbedtls_ssl_conf_authmode(&conn->conf, MBEDTLS_SSL_VERIFY_NONE);
 	}
-	ssl_set_rng(&conn->ssl, ctr_drbg_random, &conn->ctr_drbg);
-	ssl_set_bio(&conn->ssl, ps_recv, &conn->fd, ps_send, &conn->fd);
-	ssl_set_ciphersuites(&conn->ssl, ssl_list_ciphersuites());
-	ssl_set_session(&conn->ssl, &conn->ssn);
+	if (mbedtls_ssl_setup(&conn->ssl, &conn->conf))
+		return 1;
+	mbedtls_ssl_set_bio(&conn->ssl, &conn->fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 	conn->tls = 1;
-	return ssl_handshake(&conn->ssl);
+	return mbedtls_ssl_handshake(&conn->ssl);
 }
 
 struct conn *conn_connect(char *addr, char *port, char *certfile)
@@ -102,9 +97,11 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 int conn_close(struct conn *conn)
 {
 	if (conn->tls) {
-		ssl_close_notify(&conn->ssl);
-		x509_crt_free(&conn->cert);
-		ssl_free(&conn->ssl);
+		mbedtls_ssl_close_notify(&conn->ssl);
+		mbedtls_x509_crt_free(&conn->cert);
+		mbedtls_ssl_free(&conn->ssl);
+		mbedtls_ssl_config_free(&conn->conf);
+		mbedtls_ctr_drbg_free(&conn->ctr_drbg);
 	}
 	close(conn->fd);
 	free(conn);

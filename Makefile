@@ -9,7 +9,7 @@ LDFLAGS = -lssl
 # for mbedtls (polarssl)
 #OBJS = smtp.o conn_mbedtls.o
 #CFLAGS = -Wall -O2
-#LDFLAGS = -lpolarssl
+#LDFLAGS = -lmbedx509 -lmbedtls -lmbedcrypto
 
 all: smtp
 %.o: %.c conf.h
