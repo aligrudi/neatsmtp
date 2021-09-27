@@ -1,19 +1,16 @@
 #!/bin/sh
+# Send queued messages
 
 QDIR="$HOME/.smq"
 
-# change into $QDIR
 cd "$QDIR" || exit 1
-
-if test "`echo mail*`" = 'mail*'
-then
+if ! test -f "`ls mail* 2>/dev/null | head -n1`"; then
 	echo "no mail in $QDIR"
 	exit 0
 fi
 
 # process all mails
-for m in mail*
-do
+for m in mail*; do
 	if smtp <$m; then
 		rm "$m"
 		echo "$m sent successfully"

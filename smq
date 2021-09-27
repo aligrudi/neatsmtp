@@ -1,21 +1,18 @@
 #!/bin/sh
+# Queue a message
 
-QDIR=$HOME/.smq
+QDIR="$HOME/.smq"
 
 umask 077
 
-if test ! -d "$QDIR"; then
-	mkdir -p "$QDIR" || exit 1
-fi
+mkdir -p "$QDIR" || exit 1
 cd "$QDIR" || exit 1
 
-PREF="mail"
 i=0
-while test -f "$PREF$i"
-do
+while test -f "mail$i"; do
 	i=`expr $i + 1`
 done
-MAIL=$PREF$i
+MAIL=mail$i
 
-echo "$@" > "$MAIL" || exit 1
-cat > "$MAIL" || exit 1
+echo "$@" >"$MAIL" || exit 1
+cat >"$MAIL" || exit 1
