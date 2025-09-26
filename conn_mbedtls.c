@@ -18,6 +18,7 @@
 struct conn {
 	int fd;
 	int tls;
+	char *hostname;
 	mbedtls_ssl_context ssl;
 	mbedtls_ssl_session ssn;
 	mbedtls_ctr_drbg_context ctr_drbg;
@@ -55,6 +56,7 @@ int conn_tls(struct conn *conn, char *certfile)
 		mbedtls_ssl_conf_ca_chain(&conn->conf, &conn->cert, NULL);
 		mbedtls_ssl_conf_authmode(&conn->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 		mbedtls_ssl_conf_ca_chain(&conn->conf, &conn->cert, NULL);
+		mbedtls_ssl_set_hostname(&conn->ssl, conn->hostname);
 	} else {
 		mbedtls_ssl_conf_authmode(&conn->conf, MBEDTLS_SSL_VERIFY_NONE);
 	}
@@ -91,6 +93,7 @@ struct conn *conn_connect(char *addr, char *port, char *certfile)
 	conn = malloc(sizeof(*conn));
 	memset(conn, 0, sizeof(*conn));
 	conn->fd = fd;
+	conn->hostname = addr;
 	return conn;
 }
 
